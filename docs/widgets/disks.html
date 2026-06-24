@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Continuum disk percolation</title>
+<link rel="stylesheet" href="../theme.css">
+</head>
+<body>
+<h2 class="sr-only">Continuum percolation: randomly placed disks grow until, near 68 percent coverage, they overlap into a single cluster spanning left to right.</h2>
+
+<div style="display:flex; flex-wrap:wrap; gap:20px; align-items:flex-start;">
+  <div style="flex:0 0 auto;">
+    <canvas id="dlat" width="400" height="400" role="img" aria-label="Overlapping disks percolation" style="width:400px; height:auto; max-width:100%; border-radius:var(--border-radius-md); border:0.5px solid var(--color-border-tertiary); display:block;"></canvas>
+  </div>
+  <div style="flex:1 1 220px; min-width:220px; display:flex; flex-direction:column; gap:12px;">
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+      <div style="background:var(--color-background-secondary); border-radius:var(--border-radius-md); padding:0.75rem 0.9rem;">
+        <div style="font-size:13px; color:var(--color-text-secondary);">coverage</div>
+        <div id="d-cov" style="font-size:22px; font-weight:500;">45%</div>
+      </div>
+      <div style="background:var(--color-background-secondary); border-radius:var(--border-radius-md); padding:0.75rem 0.9rem;">
+        <div style="font-size:13px; color:var(--color-text-secondary);">largest cluster</div>
+        <div id="d-cl" style="font-size:22px; font-weight:500;">&mdash;</div>
+      </div>
+    </div>
+    <div style="background:var(--color-background-secondary); border-radius:var(--border-radius-md); padding:0.75rem 0.9rem; display:flex; align-items:center; gap:10px;">
+      <span id="d-ic" class="status-dot"></span>
+      <div>
+        <div style="font-size:13px; color:var(--color-text-secondary);">spanning path</div>
+        <div id="d-span" style="font-size:16px; font-weight:500;">not yet connected</div>
+      </div>
+    </div>
+    <canvas id="dcurve" width="320" height="150" role="img" aria-label="Largest cluster fraction versus coverage" style="width:100%; max-width:320px; height:auto;"></canvas>
+    <div style="font-size:12px; color:var(--color-text-tertiary); margin-top:-4px;">flat, then a break at &phi;<sub>c</sub> &asymp; 0.68 (critical coverage)</div>
+  </div>
+</div>
+
+<div style="margin-top:1.25rem; display:flex; align-items:center; gap:12px;">
+  <span style="font-size:13px; color:var(--color-text-secondary);">grow disks &rarr;</span>
+  <input id="dslider" type="range" min="0.05" max="0.95" step="0.01" value="0.45" style="flex:1;" />
+  <span id="dslider-out" style="font-size:14px; font-weight:500; min-width:34px;">45%</span>
+</div>
+<div style="display:flex; justify-content:flex-end; margin-top:8px;">
+  <button onclick="window.__disk_jump(0.68)">snap to threshold</button>
+</div>
+
+<script>
+(function(){
+  const NUM=150, PHC=0.676;
+  const dark=matchMedia('(prefers-color-scheme: dark)').matches;
+  const COL=dark
+    ? {empty:'#26261f', gray:'#6b6a63', amber:'#EF9F27', coral:'#D85A30', axis:'#5F5E5A', muted:'#888780', line:'#85B7EB', dot:'#D85A30', edge:'rgba(255,255,255,0.10)', off:'#76746c'}
+    : {empty:'#F3F1EA', gray:'#B9B7AD', amber:'#EF9F27', coral:'#D85A30', axis:'#B4B2A9', muted:'#B4B2A9', line:'#378ADD', dot:'#D85A30', edge:'rgba(0,0,0,0.08)', off:'#8a8980'};
+
+  const px=new Float32Array(NUM), py=new Float32Array(NUM);
+  for(let i=0;i<NUM;i++){ px[i]=Math.random(); py[i]=Math.random(); }
+
+  const lat=document.getElementById('dlat'), lctx=lat.getContext('2d');
+  const cur=document.getElementById('dcurve'), cctx=cur.getContext('2d');
+  const W=400;
+
+  function rFromCov(phi){ const eta=-Math.log(1-phi); return Math.sqrt(eta/(NUM*Math.PI)); }
+
+  function compute(r){
+    const parent=new Int32Array(NUM);
+    for(let i=0;i<NUM;i++)parent[i]=i;
+    function find(x){ while(parent[x]!==x){parent[x]=parent[parent[x]];x=parent[x];} return x; }
+    const d2=(2*r)*(2*r);
+    for(let i=0;i<NUM;i++) for(let j=i+1;j<NUM;j++){
+      const dx=px[i]-px[j], dy=py[i]-py[j];
+      if(dx*dx+dy*dy<d2){ const ra=find(i),rb=find(j); if(ra!==rb)parent[ra]=rb; }
+    }
+    const size=new Int32Array(NUM); let lRoot=-1,lSize=0;
+    for(let i=0;i<NUM;i++){ const r2=find(i); size[r2]++; if(size[r2]>lSize){lSize=size[r2];lRoot=r2;} }
+    const left=new Set(), right=new Set();
+    for(let i=0;i<NUM;i++){ if(px[i]<=r)left.add(find(i)); if(px[i]>=1-r)right.add(find(i)); }
+    let spans=false,sRoot=-1;
+    for(const rr of left){ if(right.has(rr)){spans=true;sRoot=rr;break;} }
+    return {find,lRoot,lSize,spans,sRoot};
+  }
+
+  const curve=[];
+  for(let k=0;k<=80;k++){ const phi=0.05+0.9*k/80; const res=compute(rFromCov(phi)); curve.push({phi, v:res.lSize/NUM}); }
+
+  function drawLattice(r,res){
+    lctx.clearRect(0,0,W,W);
+    lctx.fillStyle=COL.empty; lctx.fillRect(0,0,W,W);
+    lctx.globalAlpha=0.55; lctx.lineWidth=0.5;
+    for(let i=0;i<NUM;i++){
+      const root=res.find(i);
+      let c=COL.gray;
+      if(res.spans&&root===res.sRoot)c=COL.coral;
+      else if(root===res.lRoot)c=COL.amber;
+      lctx.fillStyle=c; lctx.strokeStyle=COL.edge;
+      lctx.beginPath(); lctx.arc(px[i]*W, py[i]*W, r*W, 0, 7); lctx.fill(); lctx.stroke();
+    }
+    lctx.globalAlpha=1;
+  }
+  function drawCurve(phi,frac){
+    const Wc=320,H=150,pad=26;
+    cctx.clearRect(0,0,Wc,H);
+    cctx.strokeStyle=COL.axis; cctx.lineWidth=1;
+    cctx.beginPath(); cctx.moveTo(pad,8); cctx.lineTo(pad,H-pad); cctx.lineTo(Wc-8,H-pad); cctx.stroke();
+    const xc=pad+PHC*(Wc-8-pad);
+    cctx.setLineDash([4,4]); cctx.strokeStyle=COL.muted;
+    cctx.beginPath(); cctx.moveTo(xc,8); cctx.lineTo(xc,H-pad); cctx.stroke(); cctx.setLineDash([]);
+    cctx.fillStyle=COL.muted; cctx.font='10px sans-serif'; cctx.fillText('φc',xc-6,H-pad+12);
+    cctx.strokeStyle=COL.line; cctx.lineWidth=2; cctx.beginPath();
+    for(let k=0;k<curve.length;k++){ const X=pad+curve[k].phi*(Wc-8-pad), Y=(H-pad)-curve[k].v*(H-pad-8);
+      if(k===0)cctx.moveTo(X,Y); else cctx.lineTo(X,Y); }
+    cctx.stroke();
+    const X=pad+phi*(Wc-8-pad), Y=(H-pad)-frac*(H-pad-8);
+    cctx.fillStyle=COL.dot; cctx.beginPath(); cctx.arc(X,Y,4,0,7); cctx.fill();
+  }
+  function update(phi){
+    const r=rFromCov(phi), res=compute(r), frac=res.lSize/NUM;
+    drawLattice(r,res); drawCurve(phi,frac);
+    document.getElementById('d-cov').textContent=Math.round(phi*100)+'%';
+    document.getElementById('dslider-out').textContent=Math.round(phi*100)+'%';
+    document.getElementById('d-cl').textContent=Math.round(frac*100)+'%';
+    const span=document.getElementById('d-span'), ic=document.getElementById('d-ic');
+    if(res.spans){ span.textContent='connected left → right'; span.style.color='var(--color-text-primary)'; ic.style.background=COL.coral; }
+    else { span.textContent='not yet connected'; span.style.color='var(--color-text-secondary)'; ic.style.background=COL.off; }
+  }
+  const s=document.getElementById('dslider');
+  s.addEventListener('input', e=>update(parseFloat(e.target.value)));
+  window.__disk_jump=function(v){ s.value=v; update(v); };
+  update(0.45);
+  try{ new ResizeObserver(()=>{ try{parent.postMessage({h:document.body.scrollHeight},'*')}catch(e){} }).observe(document.body); }catch(e){}
+})();
+</script>
+</body>
+</html>

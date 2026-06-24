@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Explosive percolation — the networks</title>
+<link rel="stylesheet" href="../theme.css">
+</head>
+<body>
+<h2 class="sr-only">Two graphs on the same nodes: random links build a giant component gradually, while suppressed links keep the graph fragmented until it suddenly snaps into one cluster.</h2>
+
+<div style="display:flex; flex-wrap:wrap; gap:16px; align-items:flex-start;">
+  <div style="flex:1 1 280px; min-width:260px;">
+    <div style="font-size:14px; font-weight:500; margin-bottom:6px;">Gradual <span style="font-weight:400; color:var(--color-text-secondary);">&mdash; random links</span></div>
+    <canvas id="gA" width="320" height="300" role="img" aria-label="Random-link graph" style="width:100%; height:auto; border-radius:var(--border-radius-md); border:0.5px solid var(--color-border-tertiary); display:block;"></canvas>
+    <div style="margin-top:8px; font-size:13px; color:var(--color-text-secondary);">giant cluster <span id="gA-pct" style="color:var(--color-text-primary); font-weight:500;">&mdash;</span></div>
+  </div>
+  <div style="flex:1 1 280px; min-width:260px;">
+    <div style="font-size:14px; font-weight:500; margin-bottom:6px;">Explosive <span style="font-weight:400; color:var(--color-text-secondary);">&mdash; suppressed links</span></div>
+    <canvas id="gB" width="320" height="300" role="img" aria-label="Suppressed-link graph" style="width:100%; height:auto; border-radius:var(--border-radius-md); border:0.5px solid var(--color-border-tertiary); display:block;"></canvas>
+    <div style="margin-top:8px; font-size:13px; color:var(--color-text-secondary);">giant cluster <span id="gB-pct" style="color:var(--color-text-primary); font-weight:500;">&mdash;</span></div>
+  </div>
+</div>
+
+<div style="margin-top:1.25rem; display:flex; align-items:center; gap:12px;">
+  <span style="font-size:13px; color:var(--color-text-secondary);">links per node &rarr;</span>
+  <input id="gslider" type="range" min="0" max="1.4" step="0.01" value="0.9" style="flex:1;" />
+  <span id="gslider-out" style="font-size:14px; font-weight:500; min-width:34px;">0.90</span>
+</div>
+<div style="display:flex; gap:8px; justify-content:flex-end; margin-top:8px;">
+  <button onclick="window.__g_jump(0.7)">just before</button>
+  <button onclick="window.__g_jump(1.05)">just after</button>
+</div>
+
+<script>
+(function(){
+  const N=180, K=6, XMAX=1.4, M=Math.round(XMAX*N);
+  const dark=matchMedia('(prefers-color-scheme: dark)').matches;
+  const COL=dark
+    ? {bg:'#26261f', node:'#6b6a63', coral:'#E06B3D', edge:'rgba(255,255,255,0.09)', cedge:'rgba(224,107,61,0.55)'}
+    : {bg:'#F4F2EB', node:'#B3B1A7', coral:'#D85A30', edge:'rgba(0,0,0,0.07)', cedge:'rgba(216,90,48,0.5)'};
+
+  const W=320,H=300,pad=16;
+  const PX=new Float32Array(N), PY=new Float32Array(N);
+  for(let i=0;i<N;i++){ PX[i]=pad+Math.random()*(W-2*pad); PY[i]=pad+Math.random()*(H-2*pad); }
+
+  function ri(){ return (Math.random()*N)|0; }
+
+  function buildRandom(){
+    const sa=new Int32Array(M), sb=new Int32Array(M);
+    for(let e=0;e<M;e++){ let a=ri(),b=ri(); while(b===a)b=ri(); sa[e]=a; sb[e]=b; }
+    return {sa,sb};
+  }
+  function buildExplosive(){
+    const parent=new Int32Array(N), size=new Int32Array(N).fill(1);
+    for(let i=0;i<N;i++)parent[i]=i;
+    function find(x){ while(parent[x]!==x){parent[x]=parent[parent[x]];x=parent[x];} return x; }
+    const sa=new Int32Array(M), sb=new Int32Array(M);
+    for(let e=0;e<M;e++){
+      let a=ri(),b=ri(); while(b===a)b=ri(); let best=size[find(a)]*size[find(b)];
+      for(let c=1;c<K;c++){ let a2=ri(),b2=ri(); while(b2===a2)b2=ri();
+        const pr=size[find(a2)]*size[find(b2)]; if(pr<best){best=pr;a=a2;b=b2;} }
+      sa[e]=a; sb[e]=b;
+      const ra=find(a),rb=find(b);
+      if(ra!==rb){ if(size[ra]<size[rb]){parent[ra]=rb;size[rb]+=size[ra];} else {parent[rb]=ra;size[ra]+=size[rb];} }
+    }
+    return {sa,sb};
+  }
+  const GA=buildRandom(), GB=buildExplosive();
+
+  function clusters(sa,sb,m){
+    const parent=new Int32Array(N);
+    for(let i=0;i<N;i++)parent[i]=i;
+    function find(x){ while(parent[x]!==x){parent[x]=parent[parent[x]];x=parent[x];} return x; }
+    for(let e=0;e<m;e++){ const ra=find(sa[e]),rb=find(sb[e]); if(ra!==rb)parent[ra]=rb; }
+    const size=new Int32Array(N); let lRoot=-1,lSize=0;
+    for(let i=0;i<N;i++){ const r=find(i); size[r]++; if(size[r]>lSize){lSize=size[r];lRoot=r;} }
+    const root=new Int32Array(N); for(let i=0;i<N;i++)root[i]=find(i);
+    return {root,lRoot,lSize};
+  }
+  function render(ctx, G, m){
+    const cl=clusters(G.sa,G.sb,m);
+    ctx.clearRect(0,0,W,H); ctx.fillStyle=COL.bg; ctx.fillRect(0,0,W,H);
+    for(let e=0;e<m;e++){ const a=G.sa[e], b=G.sb[e];
+      const inG=cl.root[a]===cl.lRoot && cl.root[b]===cl.lRoot;
+      ctx.strokeStyle=inG?COL.cedge:COL.edge; ctx.lineWidth=inG?1.1:0.5;
+      ctx.beginPath(); ctx.moveTo(PX[a],PY[a]); ctx.lineTo(PX[b],PY[b]); ctx.stroke();
+    }
+    for(let i=0;i<N;i++){ const inG=cl.root[i]===cl.lRoot;
+      ctx.fillStyle=inG?COL.coral:COL.node;
+      ctx.beginPath(); ctx.arc(PX[i],PY[i],inG?3.8:3,0,7); ctx.fill();
+    }
+    return cl.lSize;
+  }
+  const ctxA=document.getElementById('gA').getContext('2d');
+  const ctxB=document.getElementById('gB').getContext('2d');
+
+  function update(t){
+    const m=Math.min(M, Math.round(t*N));
+    const la=render(ctxA,GA,m), lb=render(ctxB,GB,m);
+    document.getElementById('gA-pct').textContent=Math.round(la/N*100)+'%';
+    document.getElementById('gB-pct').textContent=Math.round(lb/N*100)+'%';
+    document.getElementById('gslider-out').textContent=t.toFixed(2);
+  }
+  const s=document.getElementById('gslider');
+  s.addEventListener('input', e=>update(parseFloat(e.target.value)));
+  window.__g_jump=function(v){ s.value=v; update(v); };
+  update(0.9);
+  try{ new ResizeObserver(()=>{ try{parent.postMessage({h:document.body.scrollHeight},'*')}catch(e){} }).observe(document.body); }catch(e){}
+})();
+</script>
+</body>
+</html>

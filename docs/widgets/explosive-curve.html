@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Explosive percolation — order parameter</title>
+<link rel="stylesheet" href="../theme.css">
+</head>
+<body>
+<h2 class="sr-only">Explosive percolation: random links grow the giant component gradually, but choosing each link to suppress large-cluster merges makes the same transition jump almost vertically.</h2>
+
+<div style="display:flex; flex-wrap:wrap; gap:16px; margin-bottom:10px; font-size:12px; color:var(--color-text-secondary);">
+  <span style="display:flex; align-items:center; gap:6px;"><span style="width:14px; height:3px; background:#378ADD; display:inline-block; border-radius:2px;"></span>gradual &mdash; random links</span>
+  <span style="display:flex; align-items:center; gap:6px;"><span style="width:14px; height:3px; background:#D85A30; display:inline-block; border-radius:2px;"></span>explosive &mdash; suppressed links</span>
+</div>
+
+<canvas id="ecurve" width="640" height="300" role="img" aria-label="Giant component fraction versus links added per node" style="width:100%; height:auto; display:block;"></canvas>
+
+<div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:14px;">
+  <div style="background:var(--color-background-secondary); border-radius:var(--border-radius-md); padding:0.75rem 0.9rem;">
+    <div style="font-size:13px; color:var(--color-text-secondary);">gradual giant cluster</div>
+    <div id="e-er" style="font-size:22px; font-weight:500; color:#185FA5;">&mdash;</div>
+  </div>
+  <div style="background:var(--color-background-secondary); border-radius:var(--border-radius-md); padding:0.75rem 0.9rem;">
+    <div style="font-size:13px; color:var(--color-text-secondary);">explosive giant cluster</div>
+    <div id="e-ex" style="font-size:22px; font-weight:500; color:#993C1D;">&mdash;</div>
+  </div>
+</div>
+
+<div style="margin-top:1.25rem; display:flex; align-items:center; gap:12px;">
+  <span style="font-size:13px; color:var(--color-text-secondary);">links per node &rarr;</span>
+  <input id="eslider" type="range" min="0" max="1.4" step="0.01" value="1.0" style="flex:1;" />
+  <span id="eslider-out" style="font-size:14px; font-weight:500; min-width:34px;">1.00</span>
+</div>
+
+<script>
+(function(){
+  const N=3000, RUNS=3, K=5, XMAX=1.4;
+  const dark=matchMedia('(prefers-color-scheme: dark)').matches;
+  const COL=dark
+    ? {grid:'rgba(255,255,255,0.06)', axis:'#5F5E5A', muted:'#888780', er:'#85B7EB', ex:'#D85A30', txt:'#B4B2A9'}
+    : {grid:'rgba(0,0,0,0.05)', axis:'#B4B2A9', muted:'#888780', er:'#378ADD', ex:'#D85A30', txt:'#5F5E5A'};
+
+  function ri(){ return (Math.random()*N)|0; }
+
+  function run(rule){
+    const parent=new Int32Array(N), size=new Int32Array(N).fill(1);
+    for(let i=0;i<N;i++)parent[i]=i;
+    function find(x){ while(parent[x]!==x){parent[x]=parent[parent[x]];x=parent[x];} return x; }
+    let gmax=1;
+    const M=Math.round(XMAX*N), sample=Math.max(1,Math.round(M/220));
+    const xs=[], ys=[];
+    for(let e=0;e<M;e++){
+      let a,b;
+      if(rule==='er'){ a=ri(); b=ri(); }
+      else {
+        a=ri(); b=ri(); let best=size[find(a)]*size[find(b)];
+        for(let c=1;c<K;c++){ const a2=ri(), b2=ri(), pr=size[find(a2)]*size[find(b2)];
+          if(pr<best){ best=pr; a=a2; b=b2; } }
+      }
+      const ra=find(a), rb=find(b);
+      if(ra!==rb){ const ns=size[ra]+size[rb];
+        if(size[ra]<size[rb]){parent[ra]=rb; size[rb]=ns;} else {parent[rb]=ra; size[ra]=ns;}
+        if(ns>gmax)gmax=ns;
+      }
+      if(e%sample===0){ xs.push((e+1)/N); ys.push(gmax/N); }
+    }
+    return {xs,ys};
+  }
+  function avg(rule){
+    let acc=null, xs=null;
+    for(let r=0;r<RUNS;r++){ const res=run(rule); xs=res.xs;
+      if(!acc){ acc=res.ys.slice(); } else { for(let k=0;k<acc.length;k++) acc[k]+=res.ys[k]; } }
+    for(let k=0;k<acc.length;k++) acc[k]/=RUNS;
+    return {xs, ys:acc};
+  }
+  const er=avg('er'), ex=avg('ex'), xs=er.xs;
+
+  const cv=document.getElementById('ecurve'), ctx=cv.getContext('2d');
+  const W=640,H=300,L=46,Rp=14,T=14,B=34;
+  const X=t=>L+(t/XMAX)*(W-L-Rp), Y=v=>(H-B)-v*(H-B-T);
+
+  function line(data,color){
+    ctx.strokeStyle=color; ctx.lineWidth=2.5; ctx.lineJoin='round'; ctx.beginPath();
+    for(let k=0;k<xs.length;k++){ const x=X(xs[k]), y=Y(data[k]); if(k===0)ctx.moveTo(x,y); else ctx.lineTo(x,y); }
+    ctx.stroke();
+  }
+  function nearest(t){ let lo=0; for(let k=0;k<xs.length;k++){ if(xs[k]<=t)lo=k; else break; } return lo; }
+
+  function draw(t){
+    ctx.clearRect(0,0,W,H);
+    ctx.strokeStyle=COL.grid; ctx.lineWidth=1;
+    for(let g=0;g<=4;g++){ const y=Y(g/4); ctx.beginPath(); ctx.moveTo(L,y); ctx.lineTo(W-Rp,y); ctx.stroke(); }
+    ctx.strokeStyle=COL.axis;
+    ctx.beginPath(); ctx.moveTo(L,T); ctx.lineTo(L,H-B); ctx.lineTo(W-Rp,H-B); ctx.stroke();
+    ctx.fillStyle=COL.txt; ctx.font='11px sans-serif'; ctx.textAlign='right';
+    for(let g=0;g<=4;g++) ctx.fillText(Math.round(g/4*100)+'%', L-6, Y(g/4)+3);
+    ctx.textAlign='center';
+    for(let g=0;g<=1.4001;g+=0.2) ctx.fillText(g.toFixed(1), X(g), H-B+16);
+    ctx.fillText('links added per node', (L+W-Rp)/2, H-3);
+
+    line(er.ys, COL.er);
+    line(ex.ys, COL.ex);
+
+    const xv=X(t);
+    ctx.setLineDash([4,4]); ctx.strokeStyle=COL.muted; ctx.lineWidth=1;
+    ctx.beginPath(); ctx.moveTo(xv,T); ctx.lineTo(xv,H-B); ctx.stroke(); ctx.setLineDash([]);
+    const idx=nearest(t);
+    ctx.fillStyle=COL.er; ctx.beginPath(); ctx.arc(xv,Y(er.ys[idx]),4.5,0,7); ctx.fill();
+    ctx.fillStyle=COL.ex; ctx.beginPath(); ctx.arc(xv,Y(ex.ys[idx]),4.5,0,7); ctx.fill();
+
+    document.getElementById('e-er').textContent=Math.round(er.ys[idx]*100)+'%';
+    document.getElementById('e-ex').textContent=Math.round(ex.ys[idx]*100)+'%';
+    document.getElementById('eslider-out').textContent=t.toFixed(2);
+  }
+  const s=document.getElementById('eslider');
+  s.addEventListener('input', e=>draw(parseFloat(e.target.value)));
+  draw(1.0);
+  try{ new ResizeObserver(()=>{ try{parent.postMessage({h:document.body.scrollHeight},'*')}catch(e){} }).observe(document.body); }catch(e){}
+})();
+</script>
+</body>
+</html>

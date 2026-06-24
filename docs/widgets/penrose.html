@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Penrose aperiodic percolation</title>
+<link rel="stylesheet" href="../theme.css">
+</head>
+<body>
+<h2 class="sr-only">Percolation on a Penrose aperiodic tiling: each tile is occupied with probability p, and a connected cluster suddenly spans the tiling above a critical probability.</h2>
+
+<div style="display:flex; flex-wrap:wrap; gap:20px; align-items:flex-start;">
+  <div style="flex:0 0 auto;">
+    <canvas id="plat" width="440" height="440" role="img" aria-label="Penrose tiling percolation" style="width:100%; max-width:420px; height:auto; border-radius:var(--border-radius-md); border:0.5px solid var(--color-border-tertiary); display:block;"></canvas>
+  </div>
+  <div style="flex:1 1 200px; min-width:200px; display:flex; flex-direction:column; gap:12px;">
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+      <div style="background:var(--color-background-secondary); border-radius:var(--border-radius-md); padding:0.75rem 0.9rem;">
+        <div style="font-size:13px; color:var(--color-text-secondary);">occupation p</div>
+        <div id="p-p" style="font-size:22px; font-weight:500;">0.62</div>
+      </div>
+      <div style="background:var(--color-background-secondary); border-radius:var(--border-radius-md); padding:0.75rem 0.9rem;">
+        <div style="font-size:13px; color:var(--color-text-secondary);">largest cluster</div>
+        <div id="p-cl" style="font-size:22px; font-weight:500;">&mdash;</div>
+      </div>
+    </div>
+    <div style="background:var(--color-background-secondary); border-radius:var(--border-radius-md); padding:0.75rem 0.9rem; display:flex; align-items:center; gap:10px;">
+      <span id="p-ic" class="status-dot"></span>
+      <div>
+        <div style="font-size:13px; color:var(--color-text-secondary);">spanning path</div>
+        <div id="p-span" style="font-size:16px; font-weight:500;">not yet connected</div>
+      </div>
+    </div>
+    <div style="font-size:12px; color:var(--color-text-tertiary);">A tiling with five-fold symmetry that never repeats &mdash; yet percolation still has a clean threshold.</div>
+  </div>
+</div>
+
+<div style="margin-top:1.25rem; display:flex; align-items:center; gap:12px;">
+  <span style="font-size:13px; color:var(--color-text-secondary);">fill tiles &rarr;</span>
+  <input id="pslider" type="range" min="0.4" max="0.95" step="0.01" value="0.72" style="flex:1;" />
+  <span id="pslider-out" style="font-size:14px; font-weight:500; min-width:34px;">0.72</span>
+</div>
+<div style="display:flex; justify-content:flex-end; margin-top:8px;">
+  <button onclick="window.__pen_jump(0.76)">snap to threshold</button>
+</div>
+
+<script>
+(function(){
+  const PHI=(1+Math.sqrt(5))/2, SUB=6;
+  const dark=matchMedia('(prefers-color-scheme: dark)').matches;
+  const COL=dark
+    ? {bg:'#1f1f19', empty:'#2b2b23', gray:'#6b6a63', coral:'#E06B3D', amber:'#EF9F27', edge:'rgba(255,255,255,0.12)', off:'#76746c'}
+    : {bg:'#F4F2EB', empty:'#ECEAE2', gray:'#B6B4AA', coral:'#D85A30', amber:'#EF9F27', edge:'rgba(0,0,0,0.10)', off:'#8a8980'};
+
+  function lerp(a,b,t){return {x:a.x+(b.x-a.x)*t,y:a.y+(b.y-a.y)*t};}
+
+  let tris=[];
+  for(let i=0;i<10;i++){
+    let b={x:Math.cos((2*i-1)*Math.PI/10),y:Math.sin((2*i-1)*Math.PI/10)};
+    let c={x:Math.cos((2*i+1)*Math.PI/10),y:Math.sin((2*i+1)*Math.PI/10)};
+    if(i%2===0){const t=b;b=c;c=t;}
+    tris.push({col:0,A:{x:0,y:0},B:b,C:c});
+  }
+  for(let s=0;s<SUB;s++){
+    const out=[];
+    for(const t of tris){
+      const {col,A,B,C}=t;
+      if(col===0){
+        const P=lerp(A,B,1/PHI);
+        out.push({col:0,A:C,B:P,C:B});
+        out.push({col:1,A:P,B:C,C:A});
+      } else {
+        const Q=lerp(B,A,1/PHI);
+        const R=lerp(B,C,1/PHI);
+        out.push({col:1,A:R,B:C,C:A});
+        out.push({col:1,A:Q,B:R,C:B});
+        out.push({col:0,A:R,B:Q,C:A});
+      }
+    }
+    tris=out;
+  }
+  const NT=tris.length;
+
+  const cx=new Float32Array(NT), cyy=new Float32Array(NT);
+  for(let i=0;i<NT;i++){ const t=tris[i]; cx[i]=(t.A.x+t.B.x+t.C.x)/3; cyy[i]=(t.A.y+t.B.y+t.C.y)/3; }
+
+  function ek(p,q){ const ax=Math.round(p.x*1000),ay=Math.round(p.y*1000),bx=Math.round(q.x*1000),by=Math.round(q.y*1000);
+    return (ax<bx||(ax===bx&&ay<=by))?ax+','+ay+','+bx+','+by:bx+','+by+','+ax+','+ay; }
+  const emap=new Map();
+  for(let i=0;i<NT;i++){ const t=tris[i]; const es=[ek(t.A,t.B),ek(t.B,t.C),ek(t.C,t.A)];
+    for(const e of es){ let a=emap.get(e); if(!a){a=[];emap.set(e,a);} a.push(i); } }
+  const na=[], nb=[];
+  for(const arr of emap.values()){ if(arr.length===2){ na.push(arr[0]); nb.push(arr[1]); } }
+  const NE=na.length;
+
+  const rT=new Float32Array(NT); for(let i=0;i<NT;i++)rT[i]=Math.random();
+
+  let minx=1e9,maxx=-1e9;
+  for(let i=0;i<NT;i++){ if(cx[i]<minx)minx=cx[i]; if(cx[i]>maxx)maxx=cx[i]; }
+  const loThr=minx+(maxx-minx)*0.10, hiThr=maxx-(maxx-minx)*0.10;
+  const leftIdx=[], rightIdx=[];
+  for(let i=0;i<NT;i++){ if(cx[i]<loThr)leftIdx.push(i); if(cx[i]>hiThr)rightIdx.push(i); }
+
+  const lat=document.getElementById('plat'), ctx=lat.getContext('2d');
+  const W=440, sc=W*0.46, ox=W/2, oy=W/2;
+  function PXx(p){return ox+p.x*sc;} function PYy(p){return oy-p.y*sc;}
+
+  function compute(p){
+    const occ=new Uint8Array(NT), parent=new Int32Array(NT);
+    for(let i=0;i<NT;i++){ occ[i]=rT[i]<p?1:0; parent[i]=i; }
+    function find(x){ while(parent[x]!==x){parent[x]=parent[parent[x]];x=parent[x];} return x; }
+    for(let e=0;e<NE;e++){ const a=na[e],b=nb[e]; if(occ[a]&&occ[b]){ const ra=find(a),rb=find(b); if(ra!==rb)parent[ra]=rb; } }
+    const size=new Int32Array(NT); let lRoot=-1,lSize=0;
+    for(let i=0;i<NT;i++){ if(!occ[i])continue; const r=find(i); size[r]++; if(size[r]>lSize){lSize=size[r];lRoot=r;} }
+    const lset=new Set(), rset=new Set();
+    for(const i of leftIdx) if(occ[i])lset.add(find(i));
+    for(const i of rightIdx) if(occ[i])rset.add(find(i));
+    let spans=false,sRoot=-1;
+    for(const r of lset){ if(rset.has(r)){spans=true;sRoot=r;break;} }
+    return {occ,find,lRoot,lSize,spans,sRoot};
+  }
+
+  function draw(r){
+    ctx.clearRect(0,0,W,W); ctx.fillStyle=COL.bg; ctx.fillRect(0,0,W,W);
+    ctx.lineWidth=0.5; ctx.strokeStyle=COL.edge;
+    for(let i=0;i<NT;i++){ const t=tris[i];
+      let c=COL.empty;
+      if(r.occ[i]){ const root=r.find(i);
+        if(r.spans&&root===r.sRoot)c=COL.coral;
+        else if(root===r.lRoot)c=COL.amber;
+        else c=COL.gray; }
+      ctx.beginPath();
+      ctx.moveTo(PXx(t.A),PYy(t.A)); ctx.lineTo(PXx(t.B),PYy(t.B)); ctx.lineTo(PXx(t.C),PYy(t.C)); ctx.closePath();
+      ctx.fillStyle=c; ctx.fill(); ctx.stroke();
+    }
+  }
+  function update(p){
+    const r=compute(p);
+    draw(r);
+    document.getElementById('p-p').textContent=p.toFixed(2);
+    document.getElementById('pslider-out').textContent=p.toFixed(2);
+    document.getElementById('p-cl').textContent=Math.round(r.lSize/NT*100)+'%';
+    const span=document.getElementById('p-span'), ic=document.getElementById('p-ic');
+    if(r.spans){ span.textContent='connected left → right'; span.style.color='var(--color-text-primary)'; ic.style.background=COL.coral; }
+    else { span.textContent='not yet connected'; span.style.color='var(--color-text-secondary)'; ic.style.background=COL.off; }
+  }
+  const s=document.getElementById('pslider');
+  s.addEventListener('input', e=>update(parseFloat(e.target.value)));
+  window.__pen_jump=function(v){ s.value=v; update(v); };
+  update(0.72);
+  try{ new ResizeObserver(()=>{ try{parent.postMessage({h:document.body.scrollHeight},'*')}catch(e){} }).observe(document.body); }catch(e){}
+})();
+</script>
+</body>
+</html>

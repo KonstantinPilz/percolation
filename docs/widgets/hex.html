@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hexagonal percolation</title>
+<link rel="stylesheet" href="../theme.css">
+</head>
+<body>
+<h2 class="sr-only">Hexagonal site percolation: each hexagon is occupied with probability p; a spanning cluster appears at the exact critical threshold of one-half.</h2>
+
+<div style="display:flex; flex-wrap:wrap; gap:20px; align-items:flex-start;">
+  <div style="flex:0 0 auto;">
+    <canvas id="lat" width="400" height="412" role="img" aria-label="Hexagonal percolation lattice" style="width:400px; height:auto; max-width:100%; border-radius:var(--border-radius-md); border:0.5px solid var(--color-border-tertiary); display:block;"></canvas>
+  </div>
+  <div style="flex:1 1 220px; min-width:220px; display:flex; flex-direction:column; gap:12px;">
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+      <div style="background:var(--color-background-secondary); border-radius:var(--border-radius-md); padding:0.75rem 0.9rem;">
+        <div style="font-size:13px; color:var(--color-text-secondary);">occupation p</div>
+        <div id="m-p" style="font-size:22px; font-weight:500;">0.40</div>
+      </div>
+      <div style="background:var(--color-background-secondary); border-radius:var(--border-radius-md); padding:0.75rem 0.9rem;">
+        <div style="font-size:13px; color:var(--color-text-secondary);">largest cluster</div>
+        <div id="m-cl" style="font-size:22px; font-weight:500;">&mdash;</div>
+      </div>
+    </div>
+    <div style="background:var(--color-background-secondary); border-radius:var(--border-radius-md); padding:0.75rem 0.9rem; display:flex; align-items:center; gap:10px;">
+      <span id="span-ic" class="status-dot"></span>
+      <div>
+        <div style="font-size:13px; color:var(--color-text-secondary);">spanning path</div>
+        <div id="m-span" style="font-size:16px; font-weight:500;">not yet connected</div>
+      </div>
+    </div>
+    <canvas id="curve" width="320" height="150" role="img" aria-label="Order parameter curve" style="width:100%; max-width:320px; height:auto;"></canvas>
+    <div style="font-size:12px; color:var(--color-text-tertiary); margin-top:-4px;">order parameter &mdash; sharp break at p<sub>c</sub> = &frac12; (exact)</div>
+  </div>
+</div>
+
+<div style="margin-top:1.25rem; display:flex; align-items:center; gap:12px;">
+  <span style="font-size:13px; color:var(--color-text-secondary);">add connections &rarr;</span>
+  <input id="slider" type="range" min="0" max="1" step="0.01" value="0.40" style="flex:1;" />
+  <span id="slider-out" style="font-size:14px; font-weight:500; min-width:34px;">0.40</span>
+</div>
+<div style="display:flex; justify-content:flex-end; margin-top:8px;">
+  <button onclick="window.__hex_jump(0.5)">snap to threshold</button>
+</div>
+
+<script>
+(function(){
+  const C=40, R=48, S=5.5, PC=0.5;
+  const SQ3=Math.sqrt(3);
+  const dark = matchMedia('(prefers-color-scheme: dark)').matches;
+  const COL = dark
+    ? { empty:'#26261f', gray:'#5F5E5A', amber:'#EF9F27', coral:'#D85A30', stroke:'rgba(255,255,255,0.08)', axis:'#5F5E5A', muted:'#888780', line:'#85B7EB', dot:'#D85A30', off:'#76746c' }
+    : { empty:'#EFEEE7', gray:'#C9C7BD', amber:'#EF9F27', coral:'#D85A30', stroke:'rgba(0,0,0,0.06)', axis:'#B4B2A9', muted:'#B4B2A9', line:'#378ADD', dot:'#D85A30', off:'#8a8980' };
+
+  const n=R*C;
+  const field=new Float32Array(n);
+  for(let i=0;i<n;i++) field[i]=Math.random();
+
+  const ox=SQ3*S*0.5+2, oy=S+3;
+  const cxA=new Float32Array(n), cyA=new Float32Array(n);
+  for(let row=0;row<R;row++) for(let col=0;col<C;col++){
+    const i=row*C+col;
+    cxA[i]=ox+SQ3*S*(col+0.5*(row&1));
+    cyA[i]=oy+1.5*S*row;
+  }
+  const dirs=[
+    [[1,0],[0,-1],[-1,-1],[-1,0],[-1,1],[0,1]],
+    [[1,0],[1,-1],[0,-1],[-1,0],[0,1],[1,1]]
+  ];
+  const nbr=new Array(n);
+  for(let row=0;row<R;row++) for(let col=0;col<C;col++){
+    const i=row*C+col, out=[];
+    for(const d of dirs[row&1]){ const nc=col+d[0], nr=row+d[1];
+      if(nc>=0&&nc<C&&nr>=0&&nr<R) out.push(nr*C+nc); }
+    nbr[i]=out;
+  }
+
+  const lat=document.getElementById('lat'), lctx=lat.getContext('2d');
+  const cur=document.getElementById('curve'), cctx=cur.getContext('2d');
+
+  function compute(p){
+    const parent=new Int32Array(n), occ=new Uint8Array(n);
+    for(let i=0;i<n;i++){ parent[i]=i; occ[i]= field[i]<p?1:0; }
+    function find(x){ while(parent[x]!==x){ parent[x]=parent[parent[x]]; x=parent[x]; } return x; }
+    function uni(a,b){ const ra=find(a),rb=find(b); if(ra!==rb)parent[ra]=rb; }
+    for(let i=0;i<n;i++){ if(!occ[i])continue; for(const j of nbr[i]) if(j>i&&occ[j])uni(i,j); }
+    const size=new Int32Array(n); let lRoot=-1,lSize=0;
+    for(let i=0;i<n;i++){ if(!occ[i])continue; const r=find(i); size[r]++; if(size[r]>lSize){lSize=size[r];lRoot=r;} }
+    const top=new Set(), bot=new Set();
+    for(let col=0;col<C;col++){ if(occ[col])top.add(find(col)); const b=(R-1)*C+col; if(occ[b])bot.add(find(b)); }
+    let spans=false,sRoot=-1;
+    for(const r of top){ if(bot.has(r)){spans=true;sRoot=r;break;} }
+    return {occ,find,lRoot,lSize,spans,sRoot};
+  }
+
+  const curve=[];
+  for(let k=0;k<=100;k++){ const p=k/100; const r=compute(p); curve.push({p,v:r.lSize/n}); }
+
+  function hexPath(cx,cy){
+    lctx.beginPath();
+    for(let i=0;i<6;i++){ const a=Math.PI/180*(60*i-90); const x=cx+S*Math.cos(a), y=cy+S*Math.sin(a);
+      if(i===0)lctx.moveTo(x,y); else lctx.lineTo(x,y); }
+    lctx.closePath();
+  }
+  function drawLattice(r){
+    lctx.clearRect(0,0,400,412);
+    lctx.lineWidth=0.6; lctx.strokeStyle=COL.stroke;
+    for(let i=0;i<n;i++){
+      let c=COL.empty;
+      if(r.occ[i]){ const root=r.find(i);
+        if(r.spans&&root===r.sRoot)c=COL.coral;
+        else if(root===r.lRoot)c=COL.amber;
+        else c=COL.gray; }
+      hexPath(cxA[i],cyA[i]); lctx.fillStyle=c; lctx.fill(); lctx.stroke();
+    }
+  }
+  function drawCurve(p,frac){
+    const W=320,H=150,pad=26;
+    cctx.clearRect(0,0,W,H);
+    cctx.strokeStyle=COL.axis; cctx.lineWidth=1;
+    cctx.beginPath(); cctx.moveTo(pad,8); cctx.lineTo(pad,H-pad); cctx.lineTo(W-8,H-pad); cctx.stroke();
+    const xc=pad+PC*(W-8-pad);
+    cctx.setLineDash([4,4]); cctx.strokeStyle=COL.muted;
+    cctx.beginPath(); cctx.moveTo(xc,8); cctx.lineTo(xc,H-pad); cctx.stroke(); cctx.setLineDash([]);
+    cctx.fillStyle=COL.muted; cctx.font='10px sans-serif'; cctx.fillText('pc = ½',xc-12,H-pad+12);
+    cctx.strokeStyle=COL.line; cctx.lineWidth=2; cctx.beginPath();
+    for(let k=0;k<curve.length;k++){ const X=pad+curve[k].p*(W-8-pad), Y=(H-pad)-curve[k].v*(H-pad-8);
+      if(k===0)cctx.moveTo(X,Y); else cctx.lineTo(X,Y); }
+    cctx.stroke();
+    const X=pad+p*(W-8-pad), Y=(H-pad)-frac*(H-pad-8);
+    cctx.fillStyle=COL.dot; cctx.beginPath(); cctx.arc(X,Y,4,0,7); cctx.fill();
+  }
+  function update(p){
+    const r=compute(p), frac=r.lSize/n;
+    drawLattice(r); drawCurve(p,frac);
+    document.getElementById('m-p').textContent=p.toFixed(2);
+    document.getElementById('slider-out').textContent=p.toFixed(2);
+    document.getElementById('m-cl').textContent=Math.round(frac*100)+'%';
+    const span=document.getElementById('m-span'), ic=document.getElementById('span-ic');
+    if(r.spans){ span.textContent='connected top → bottom'; span.style.color='var(--color-text-primary)'; ic.style.background=COL.coral; }
+    else { span.textContent='not yet connected'; span.style.color='var(--color-text-secondary)'; ic.style.background=COL.off; }
+  }
+  const slider=document.getElementById('slider');
+  slider.addEventListener('input', e=>update(parseFloat(e.target.value)));
+  window.__hex_jump=function(v){ slider.value=v; update(v); };
+  update(0.40);
+  try{ new ResizeObserver(()=>{ try{parent.postMessage({h:document.body.scrollHeight},'*')}catch(e){} }).observe(document.body); }catch(e){}
+})();
+</script>
+</body>
+</html>

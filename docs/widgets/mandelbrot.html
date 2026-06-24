@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mandelbrot fractal percolation</title>
+<link rel="stylesheet" href="../theme.css">
+</head>
+<body>
+<h2 class="sr-only">Mandelbrot fractal percolation: a square is recursively subdivided and cells kept at random with probability p, producing a random fractal that connects across above a critical p and shatters into dust below it.</h2>
+
+<div style="display:flex; flex-wrap:wrap; gap:20px; align-items:flex-start;">
+  <div style="flex:0 0 auto;">
+    <canvas id="mlat" width="486" height="486" role="img" aria-label="Fractal percolation set" style="width:100%; max-width:430px; height:auto; border-radius:var(--border-radius-md); border:0.5px solid var(--color-border-tertiary); display:block;"></canvas>
+  </div>
+  <div style="flex:1 1 210px; min-width:210px; display:flex; flex-direction:column; gap:12px;">
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+      <div style="background:var(--color-background-secondary); border-radius:var(--border-radius-md); padding:0.75rem 0.9rem;">
+        <div style="font-size:13px; color:var(--color-text-secondary);">keep prob p</div>
+        <div id="m-p" style="font-size:22px; font-weight:500;">0.85</div>
+      </div>
+      <div style="background:var(--color-background-secondary); border-radius:var(--border-radius-md); padding:0.75rem 0.9rem;">
+        <div style="font-size:13px; color:var(--color-text-secondary);">surviving</div>
+        <div id="m-surv" style="font-size:22px; font-weight:500;">&mdash;</div>
+      </div>
+    </div>
+    <div style="background:var(--color-background-secondary); border-radius:var(--border-radius-md); padding:0.75rem 0.9rem; display:flex; align-items:center; gap:10px;">
+      <span id="m-ic" class="status-dot"></span>
+      <div>
+        <div style="font-size:13px; color:var(--color-text-secondary);">crossing</div>
+        <div id="m-span" style="font-size:16px; font-weight:500;">dust — no path</div>
+      </div>
+    </div>
+    <canvas id="mcurve" width="320" height="150" role="img" aria-label="Largest cluster fraction versus keep probability" style="width:100%; max-width:320px; height:auto;"></canvas>
+    <div style="font-size:12px; color:var(--color-text-tertiary); margin-top:-4px;">connectivity collapses abruptly as p falls &mdash; the fractal turns to dust</div>
+  </div>
+</div>
+
+<div style="margin-top:1.25rem; display:flex; align-items:center; gap:12px;">
+  <span style="font-size:13px; color:var(--color-text-secondary);">keep probability &rarr;</span>
+  <input id="mslider" type="range" min="0.55" max="1" step="0.005" value="0.88" style="flex:1;" />
+  <span id="mslider-out" style="font-size:14px; font-weight:500; min-width:40px;">0.88</span>
+</div>
+<div style="display:flex; justify-content:flex-end; margin-top:8px;">
+  <button onclick="window.__m_jump(0.78)">shatter it</button>
+</div>
+
+<script>
+(function(){
+  const D=5, S=243, pw=[1,3,9,27,81,243];
+  const dark=matchMedia('(prefers-color-scheme: dark)').matches;
+  const COL=dark
+    ? {empty:'#1f1f19', gray:'#6b6a63', coral:'#E06B3D', axis:'#5F5E5A', muted:'#888780', line:'#85B7EB', dot:'#D85A30', off:'#76746c'}
+    : {empty:'#F4F2EB', gray:'#ADABA1', coral:'#D85A30', axis:'#B4B2A9', muted:'#B4B2A9', line:'#378ADD', dot:'#D85A30', off:'#8a8980'};
+
+  const U=[];
+  for(let l=1;l<=D;l++){ const side=pw[l], a=new Float32Array(side*side); for(let i=0;i<a.length;i++)a[i]=Math.random(); U.push(a); }
+  const Mx=new Float32Array(S*S);
+  for(let y=0;y<S;y++) for(let x=0;x<S;x++){
+    let m=0;
+    for(let l=1;l<=D;l++){ const side=pw[l], div=pw[D-l]; const idx=((y/div)|0)*side+((x/div)|0); const v=U[l-1][idx]; if(v>m)m=v; }
+    Mx[y*S+x]=m;
+  }
+
+  const lat=document.getElementById('mlat'), lctx=lat.getContext('2d');
+  const cur=document.getElementById('mcurve'), cctx=cur.getContext('2d');
+  const CW=486, cell=CW/S;
+
+  function compute(p){
+    const n=S*S, occ=new Uint8Array(n), parent=new Int32Array(n);
+    let surv=0;
+    for(let i=0;i<n;i++){ const o=Mx[i]<p?1:0; occ[i]=o; surv+=o; parent[i]=i; }
+    function find(x){ while(parent[x]!==x){parent[x]=parent[parent[x]];x=parent[x];} return x; }
+    for(let y=0;y<S;y++) for(let x=0;x<S;x++){ const i=y*S+x; if(!occ[i])continue;
+      if(x+1<S&&occ[i+1]){const a=find(i),b=find(i+1);if(a!==b)parent[a]=b;}
+      if(y+1<S&&occ[i+S]){const a=find(i),b=find(i+S);if(a!==b)parent[a]=b;}
+    }
+    const size=new Int32Array(n); let lRoot=-1,lSize=0;
+    for(let i=0;i<n;i++){ if(!occ[i])continue; const r=find(i); size[r]++; if(size[r]>lSize){lSize=size[r];lRoot=r;} }
+    const left=new Set(), right=new Set();
+    for(let y=0;y<S;y++){ const li=y*S; if(occ[li])left.add(find(li)); const ri=y*S+S-1; if(occ[ri])right.add(find(ri)); }
+    let spans=false,sRoot=-1;
+    for(const r of left){ if(right.has(r)){spans=true;sRoot=r;break;} }
+    return {occ,find,lRoot,lSize,spans,sRoot,surv:surv/n};
+  }
+
+  const curve=[];
+  for(let k=0;k<=70;k++){ const p=0.55+0.45*k/70; const r=compute(p); curve.push({p,v:r.lSize/(S*S)}); }
+
+  function drawLattice(r){
+    lctx.clearRect(0,0,CW,CW); lctx.fillStyle=COL.empty; lctx.fillRect(0,0,CW,CW);
+    for(let y=0;y<S;y++) for(let x=0;x<S;x++){ const i=y*S+x; if(!r.occ[i])continue;
+      const root=r.find(i);
+      lctx.fillStyle=(r.spans&&root===r.sRoot)?COL.coral:COL.gray;
+      lctx.fillRect(x*cell, y*cell, cell+0.5, cell+0.5);
+    }
+  }
+  function drawCurve(p,frac){
+    const W=320,H=150,pad=26;
+    cctx.clearRect(0,0,W,H);
+    cctx.strokeStyle=COL.axis; cctx.lineWidth=1;
+    cctx.beginPath(); cctx.moveTo(pad,8); cctx.lineTo(pad,H-pad); cctx.lineTo(W-8,H-pad); cctx.stroke();
+    cctx.strokeStyle=COL.line; cctx.lineWidth=2; cctx.beginPath();
+    for(let k=0;k<curve.length;k++){ const X=pad+(curve[k].p-0.55)/0.45*(W-8-pad), Y=(H-pad)-curve[k].v*(H-pad-8);
+      if(k===0)cctx.moveTo(X,Y); else cctx.lineTo(X,Y); }
+    cctx.stroke();
+    const X=pad+(p-0.55)/0.45*(W-8-pad), Y=(H-pad)-frac*(H-pad-8);
+    cctx.fillStyle=COL.dot; cctx.beginPath(); cctx.arc(X,Y,4,0,7); cctx.fill();
+  }
+  function update(p){
+    const r=compute(p), frac=r.lSize/(S*S);
+    drawLattice(r); drawCurve(p,frac);
+    document.getElementById('m-p').textContent=p.toFixed(3);
+    document.getElementById('mslider-out').textContent=p.toFixed(3);
+    document.getElementById('m-surv').textContent=Math.round(r.surv*100)+'%';
+    const span=document.getElementById('m-span'), ic=document.getElementById('m-ic');
+    if(r.spans){ span.textContent='connected across'; span.style.color='var(--color-text-primary)'; ic.style.background=COL.coral; }
+    else { span.textContent='dust — no path'; span.style.color='var(--color-text-secondary)'; ic.style.background=COL.off; }
+  }
+  const s=document.getElementById('mslider');
+  s.addEventListener('input', e=>update(parseFloat(e.target.value)));
+  window.__m_jump=function(v){ s.value=v; update(v); };
+  update(0.88);
+  try{ new ResizeObserver(()=>{ try{parent.postMessage({h:document.body.scrollHeight},'*')}catch(e){} }).observe(document.body); }catch(e){}
+})();
+</script>
+</body>
+</html>

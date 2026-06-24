@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Square-lattice percolation</title>
+<link rel="stylesheet" href="../theme.css">
+</head>
+<body>
+<h2 class="sr-only">Square-lattice site percolation: dragging the occupation probability p upward produces a sudden spanning cluster near the critical threshold 0.593.</h2>
+
+<div style="display:flex; flex-wrap:wrap; gap:20px; align-items:flex-start;">
+  <div style="flex:0 0 auto;">
+    <canvas id="lat" width="384" height="384" role="img" aria-label="Percolation lattice grid" style="width:384px; max-width:100%; height:auto; border-radius:var(--border-radius-md); border:0.5px solid var(--color-border-tertiary); display:block;"></canvas>
+  </div>
+  <div style="flex:1 1 230px; min-width:230px; display:flex; flex-direction:column; gap:12px;">
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+      <div style="background:var(--color-background-secondary); border-radius:var(--border-radius-md); padding:0.75rem 0.9rem;">
+        <div style="font-size:13px; color:var(--color-text-secondary);">occupation p</div>
+        <div id="m-p" style="font-size:22px; font-weight:500;">0.45</div>
+      </div>
+      <div style="background:var(--color-background-secondary); border-radius:var(--border-radius-md); padding:0.75rem 0.9rem;">
+        <div style="font-size:13px; color:var(--color-text-secondary);">largest cluster</div>
+        <div id="m-cl" style="font-size:22px; font-weight:500;">&mdash;</div>
+      </div>
+    </div>
+    <div style="background:var(--color-background-secondary); border-radius:var(--border-radius-md); padding:0.75rem 0.9rem; display:flex; align-items:center; gap:10px;">
+      <span id="span-ic" class="status-dot"></span>
+      <div>
+        <div style="font-size:13px; color:var(--color-text-secondary);">spanning path</div>
+        <div id="m-span" style="font-size:16px; font-weight:500;">not yet connected</div>
+      </div>
+    </div>
+    <canvas id="curve" width="320" height="150" role="img" aria-label="Order parameter curve" style="width:100%; max-width:320px; height:auto;"></canvas>
+    <div style="font-size:12px; color:var(--color-text-tertiary); margin-top:-4px;">order parameter &mdash; flat, then a sharp break at p<sub>c</sub> &asymp; 0.593</div>
+  </div>
+</div>
+
+<div style="margin-top:1.25rem; display:flex; align-items:center; gap:12px;">
+  <span style="font-size:13px; color:var(--color-text-secondary);">add connections &rarr;</span>
+  <input id="slider" type="range" min="0" max="1" step="0.01" value="0.45" style="flex:1;" />
+  <span id="slider-out" style="font-size:14px; font-weight:500; min-width:34px;">0.45</span>
+</div>
+<div style="display:flex; justify-content:flex-end; margin-top:8px;">
+  <button onclick="window.__perc_jump(0.59)">snap to threshold</button>
+</div>
+
+<script>
+(function(){
+  const N = 64, CELL = 6, PC = 0.5927;
+  const dark = matchMedia('(prefers-color-scheme: dark)').matches;
+  const COL = dark
+    ? { empty:'#26261f', gray:'#5F5E5A', amber:'#EF9F27', coral:'#D85A30', axis:'#5F5E5A', muted:'#888780', line:'#85B7EB', dot:'#D85A30', off:'#76746c' }
+    : { empty:'#EFEEE7', gray:'#C9C7BD', amber:'#EF9F27', coral:'#D85A30', axis:'#B4B2A9', muted:'#B4B2A9', line:'#378ADD', dot:'#D85A30', off:'#8a8980' };
+
+  const field = new Float32Array(N*N);
+  for (let i=0;i<N*N;i++) field[i] = Math.random();
+
+  const lat = document.getElementById('lat'), lctx = lat.getContext('2d');
+  const cur = document.getElementById('curve'), cctx = cur.getContext('2d');
+
+  function compute(p){
+    const n=N*N, parent=new Int32Array(n), occ=new Uint8Array(n);
+    for(let i=0;i<n;i++){ parent[i]=i; occ[i]= field[i]<p ?1:0; }
+    function find(x){ while(parent[x]!==x){ parent[x]=parent[parent[x]]; x=parent[x]; } return x; }
+    function uni(a,b){ const ra=find(a),rb=find(b); if(ra!==rb) parent[ra]=rb; }
+    for(let y=0;y<N;y++) for(let x=0;x<N;x++){ const i=y*N+x; if(!occ[i])continue;
+      if(x+1<N&&occ[i+1])uni(i,i+1); if(y+1<N&&occ[i+N])uni(i,i+N); }
+    const size=new Int32Array(n); let lRoot=-1,lSize=0;
+    for(let i=0;i<n;i++){ if(!occ[i])continue; const r=find(i); size[r]++; if(size[r]>lSize){lSize=size[r];lRoot=r;} }
+    const top=new Set(), bot=new Set();
+    for(let x=0;x<N;x++){ if(occ[x])top.add(find(x)); const b=(N-1)*N+x; if(occ[b])bot.add(find(b)); }
+    let spans=false, sRoot=-1;
+    for(const r of top){ if(bot.has(r)){ spans=true; sRoot=r; break; } }
+    return {occ, find, lRoot, lSize, spans, sRoot};
+  }
+
+  const curve=[];
+  for(let k=0;k<=100;k++){ const p=k/100; const r=compute(p); curve.push({p, v:r.lSize/(N*N)}); }
+
+  function drawLattice(p, r){
+    lctx.clearRect(0,0,384,384);
+    for(let y=0;y<N;y++) for(let x=0;x<N;x++){
+      const i=y*N+x; let c=COL.empty;
+      if(r.occ[i]){ const root=r.find(i);
+        if(r.spans && root===r.sRoot) c=COL.coral;
+        else if(root===r.lRoot) c=COL.amber;
+        else c=COL.gray;
+      }
+      lctx.fillStyle=c; lctx.fillRect(x*CELL,y*CELL,CELL-0.5,CELL-0.5);
+    }
+  }
+  function drawCurve(p, frac){
+    const W=320,H=150,pad=26;
+    cctx.clearRect(0,0,W,H);
+    cctx.strokeStyle=COL.axis; cctx.lineWidth=1;
+    cctx.beginPath(); cctx.moveTo(pad,8); cctx.lineTo(pad,H-pad); cctx.lineTo(W-8,H-pad); cctx.stroke();
+    const xc=pad+PC*(W-8-pad);
+    cctx.setLineDash([4,4]); cctx.strokeStyle=COL.muted; cctx.beginPath(); cctx.moveTo(xc,8); cctx.lineTo(xc,H-pad); cctx.stroke(); cctx.setLineDash([]);
+    cctx.fillStyle=COL.muted; cctx.font='10px sans-serif'; cctx.fillText('pc',xc-6,H-pad+12);
+    cctx.strokeStyle=COL.line; cctx.lineWidth=2; cctx.beginPath();
+    for(let k=0;k<curve.length;k++){ const X=pad+curve[k].p*(W-8-pad), Y=(H-pad)-curve[k].v*(H-pad-8);
+      if(k===0)cctx.moveTo(X,Y); else cctx.lineTo(X,Y); }
+    cctx.stroke();
+    const X=pad+p*(W-8-pad), Y=(H-pad)-frac*(H-pad-8);
+    cctx.fillStyle=COL.dot; cctx.beginPath(); cctx.arc(X,Y,4,0,7); cctx.fill();
+  }
+  function update(p){
+    const r=compute(p), frac=r.lSize/(N*N);
+    drawLattice(p,r); drawCurve(p,frac);
+    document.getElementById('m-p').textContent=p.toFixed(2);
+    document.getElementById('slider-out').textContent=p.toFixed(2);
+    document.getElementById('m-cl').textContent=Math.round(frac*100)+'%';
+    const span=document.getElementById('m-span'), ic=document.getElementById('span-ic');
+    if(r.spans){ span.textContent='connected top → bottom'; span.style.color='var(--color-text-primary)'; ic.style.background=COL.coral; }
+    else { span.textContent='not yet connected'; span.style.color='var(--color-text-secondary)'; ic.style.background=COL.off; }
+  }
+  const slider=document.getElementById('slider');
+  slider.addEventListener('input', e=>update(parseFloat(e.target.value)));
+  window.__perc_jump=function(v){ slider.value=v; update(v); };
+  update(0.45);
+  try{ new ResizeObserver(()=>{ try{parent.postMessage({h:document.body.scrollHeight},'*')}catch(e){} }).observe(document.body); }catch(e){}
+})();
+</script>
+</body>
+</html>
